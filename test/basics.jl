@@ -1,7 +1,6 @@
 using MPI
 using MPIArrays
 using Base.Test
-using BenchmarkTools
 using Compat
 
 MPI.Init()
