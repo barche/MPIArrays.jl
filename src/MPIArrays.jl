@@ -233,23 +233,25 @@ Allocate a local array with the size to fit the block
 """
 allocate(b::Block{T,N}) where {T,N} = Array{T}(length.(b.ranges))
 
-function blockloop(a::AbstractArray{T,N}, b::Block{T,N}, localfun, mpifun) where {T,N}
+function blockloop(a::AbstractArray{T,N}, b::Block{T,N}, locktype::MPI.LockType, localfun, mpifun) where {T,N}
     for rankindex in b.targetrankindices
         r = b.array.partitioning.ranks[rankindex] - 1
         localinds = localindices(b.array,r)
         globalrange = b.ranges .∩ localinds
         a_range = globalrange .- first.(b.ranges) .+ 1
         b_range = globalrange .- first.(localinds) .+ 1
-        MPI.Win_lock(MPI.LOCK_SHARED, r, 0, b.array.win)
+        MPI.Win_lock(locktype, r, 0, b.array.win)
         if r == b.array.myrank
             localfun(a, a_range, b.array.localarray, b_range)
         else
             alin = LinearIndices(a)
-            blin = LinearIndices(b.array.localarray)
+            blin = LinearIndices(length.(localinds))
             for (ai,bi) in zip(CartesianIndices(a_range[2:end]),CartesianIndices(b_range[2:end]))
                 a_linear_range = alin[a_range[1][1],ai]:alin[a_range[1][end],ai]
-                b_begin = blin[b_range[1][1],bi]
-                mpifun(pointer(a,first(a_linear_range)), length(a_linear_range), r, b_begin-1, b.array.win)
+                b_begin = blin[b_range[1][1],bi] - 1
+                range_len = length(a_linear_range)
+                @assert b_begin + range_len <= prod(length.(localinds))
+                mpifun(pointer(a,first(a_linear_range)), range_len, r, b_begin, b.array.win)
             end
         end
         MPI.Win_unlock(r, b.array.win)
@@ -263,7 +265,7 @@ function getblock!(a::AbstractArray{T,N}, b::Block{T,N}) where {T,N}
     localfun = function(local_a, a_range, local_b, b_range)
         local_a[a_range...] .= local_b[b_range...]
     end
-    blockloop(a, b, localfun, MPI.Get)
+    blockloop(a, b, MPI.LOCK_SHARED, localfun, MPI.Get)
 end
 
 """
@@ -290,7 +292,7 @@ function putblock!(a::AbstractArray{T,N}, b::Block{T,N}, op::Function=_no_op) wh
     mpifun = function(origin, count, target_rank, target_disp, win)
         _mpi_put_with_op(origin, count, target_rank, target_disp, win, op)
     end
-    blockloop(a, b, localfun, mpifun)
+    blockloop(a, b, MPI.LOCK_EXCLUSIVE, localfun, mpifun)
 end
 
 function free(a::MPIArray{T,N}) where {T,N}
