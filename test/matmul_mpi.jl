@@ -9,12 +9,13 @@ const nb_procs = MPI.Comm_size(comm)
 
 do_serial = (rank == 0)
 
-include("matmul_setup.jl")
+include(joinpath(@__DIR__, "matmul_setup.jl"))
 
 function timed_mul(A::MPIArray,x::MPIArray)
-    for i in 1:3
+    times = zeros(nsamples)
+    for i in 1:length(times)
         if rank == 0
-            @time begin
+            val, times[i], bytes, gctime, memallocs = @timed begin
                 b = A*x
                 MPI.Barrier(A.comm)
             end
@@ -24,6 +25,7 @@ function timed_mul(A::MPIArray,x::MPIArray)
         end
         free(b)
     end
+    return extrema(times[2:end])
 end
 
 @testset "MatMul" begin
@@ -48,10 +50,10 @@ end
 
 MPI.Barrier(comm)
 
-rank == 0 && println("Parallel, rows distributed:")
-timed_mul(A1,x)
-rank == 0 && println("Parallel, columns distributed:")
-timed_mul(A2,x)
+(mintime, maxtime) = timed_mul(A1,x)
+rank == 0 && write_timings("out-mpi.txt", 1, mintime, maxtime)
+(mintime, maxtime) = timed_mul(A2,x)
+rank == 0 && write_timings("out-mpi.txt", 2, mintime, maxtime)
 
 MPI.Barrier(comm)
 
