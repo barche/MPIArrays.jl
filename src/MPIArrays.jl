@@ -90,12 +90,33 @@ struct MPIArray{T,N} <: AbstractArray{T,N}
 
     MPIArray{T}(sizes::Vararg{Int,N}) where {T,N} = MPIArray{T}(MPI.COMM_WORLD, (MPI.Comm_size(MPI.COMM_WORLD), ones(Int,N-1)...), sizes...)
     MPIArray{T}(comm::MPI.Comm, partitions::NTuple{N,Int}, sizes::Vararg{Int,N}) where {T,N} = MPIArray{T}(comm, distribute.(sizes, partitions)...)
+
+    function MPIArray(comm::MPI.Comm, localarray::Array{T,N}, nb_partitions::Vararg{Int,N}) where {T,N}
+        nb_procs = MPI.Comm_size(comm)
+        rank = MPI.Comm_rank(comm)
+        
+        partition_size_array = reshape(MPI.Allgather(size(localarray), comm), nb_partitions...)
+
+        partition_sizes = ntuple(N) do dim
+            idx = ntuple(i -> i == dim ? Colon() : 1,N)
+            return getindex.(partition_size_array[idx...],dim)
+        end
+
+        win = MPI.Win()
+        MPI.Win_create(localarray, MPI.INFO_NULL, comm, win)
+        result = new{T,N}(sum.(partition_sizes), localarray, ContinuousPartitioning(partition_sizes...), comm, win, rank)
+        return result
+    end
+
+    MPIArray(localarray::Array{T,N}, nb_partitions::Vararg{Int,N}) where {T,N} = MPIArray(MPI.COMM_WORLD, localarray, nb_partitions...)
 end
+
 
 Base.IndexStyle(::Type{MPIArray{T,N}}) where {T,N} = IndexCartesian()
 
 Base.size(a::MPIArray) = a.sizes
 
+# Individual element access. WARNING: this is slow
 function Base.getindex(a::MPIArray{T,N}, I::Vararg{Int, N}) where {T,N}
     (target_rank, locind) = local_index(a.partitioning,I)
     
@@ -110,6 +131,7 @@ function Base.getindex(a::MPIArray{T,N}, I::Vararg{Int, N}) where {T,N}
     return result[]
 end
 
+# Individual element setting. WARNING: this is slow
 function Base.setindex!(a::MPIArray{T,N}, v, I::Vararg{Int, N}) where {T,N}
     (target_rank, locind) = local_index(a.partitioning,I)
     
@@ -152,6 +174,14 @@ function Base.similar(a::MPIArray, ::Type{T}, dims::NTuple{N,Int}) where {T,N}
     return MPIArray{T}(a.comm, new_partition_sizes...)
 end
 
+function Base.filter(f,a::MPIArray)
+    error("filter is only supported on 1D MPIArrays")
+end
+
+function Base.filter(f,a::MPIArray{T,1}) where T
+    return MPIArray(forlocalpart(v -> filter(f,v), a), length(a.partitioning))
+end
+
 function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) where {T}
     forlocalpart!(y) do ly
         fill!(ly,zero(T))
@@ -176,7 +206,6 @@ Get the local index range (expressed in terms of global indices) of the given ra
 """
 @inline localindices(a::MPIArray, rank::Integer=a.myrank) = a.partitioning[rank+1]
 
-
 """
     forlocalpart(f, a::MPIArray)
 
@@ -184,8 +213,9 @@ Execute the function f on the part of a owned by the current rank. It is assumed
 """
 function forlocalpart(f, a::MPIArray)
     MPI.Win_lock(MPI.LOCK_SHARED, a.myrank, 0, a.win)
-    f(a.localarray)
+    result = f(a.localarray)
     MPI.Win_unlock(a.myrank, a.win)
+    return result
 end
 
 """
@@ -195,8 +225,9 @@ Execute the function f on the part of a owned by the current rank. The local par
 """
 function forlocalpart!(f, a::MPIArray)
     MPI.Win_lock(MPI.LOCK_EXCLUSIVE, a.myrank, 0, a.win)
-    f(a.localarray)
+    result = f(a.localarray)
     MPI.Win_unlock(a.myrank, a.win)
+    return result
 end
 
 function linear_ranges(indexblock)

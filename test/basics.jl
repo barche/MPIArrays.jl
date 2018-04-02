@@ -44,6 +44,7 @@ function do_test(partitions::Vararg{Int,N}) where N
 end
 
 vec = do_test(nb_procs)
+@test size(vec) == (nb_procs*4,)
 
 if nb_procs % 2 == 0
     p1 = nb_procs ÷ 2
@@ -55,10 +56,10 @@ end
 @test p1*p2 == nb_procs
 mat = do_test(p1, p2)
 
-ten = MPIArray{Float64}(comm, (2,2,2), 5,6,7)
+ten = MPIArray{Float64}(comm, (1,1,nb_procs), 5,6,7)
 
 MPI.Barrier(comm)
-@test size(ten.partitioning) == (2,2,2)
+@test size(ten.partitioning) == (1,1,nb_procs)
 
 forlocalpart!(lp -> lp .= rank+1, vec)
 forlocalpart!(lp -> lp .= rank+1, mat)
@@ -93,6 +94,7 @@ sim2 = similar(mat, (10,))
 sim3 = similar(mat, (3,4,5))
 @test size(sim3) == (3,4,5)
 
+MPI.Barrier(comm)
 end
 
 @testset "ArrayBlock" begin
@@ -157,6 +159,35 @@ end
     forlocalpart!(mat2) do A
         @test all(A .== serial_mat2[localindices(mat2)...] .* (nb_procs+1))
     end
+end
+
+@testset "Filter" begin
+
+MPI.Barrier(comm)
+
+localarray = fill(rank+1, 2*(rank+1))
+vec_from_local = MPIArray(localarray, nb_procs)
+@test size(vec_from_local) == (sum(1:nb_procs)*2,)
+@test forlocalpart(lp -> all(lp .== localarray), vec_from_local)
+
+localarray = fill(rank+1, 5, 2*(rank+1))
+mat_from_local = MPIArray(localarray, 1, nb_procs)
+@test size(mat_from_local) == (5, sum(1:nb_procs)*2,)
+@test forlocalpart(lp -> all(lp .== localarray), mat_from_local)
+
+testrange = collect(1:100)
+mpirange = MPIArray{Int}(length(testrange))
+if rank == 0
+    putblock!(testrange,mpirange[:])
+end
+MPI.Barrier(comm)
+
+filtered_range = filter(isodd, mpirange)
+@test length(filtered_range) == length(testrange) ÷ 2
+@test all(filtered_range .== filter(isodd, testrange))
+
+MPI.Barrier(comm)
+
 end
 
 MPI.Finalize()
