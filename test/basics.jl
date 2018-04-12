@@ -85,6 +85,14 @@ end
 
 MPI.Barrier(comm)
 
+mat_redist = redistribute(mat, 1, nb_procs)
+
+MPI.Barrier(comm)
+
+if rank == 0
+    @test all(mat_redist .== mat)
+end
+
 sim1 = similar(mat, Float64)
 @test sim1.partitioning == mat.partitioning
 @test typeof(sim1[1]) == Float64
@@ -98,67 +106,69 @@ MPI.Barrier(comm)
 end
 
 @testset "ArrayBlock" begin
-    dims = MPIArray{Int}(comm, (nb_procs,), 2,)
-    
-    if rank == 0
-        dims[1] = rand(nb_procs:5*nb_procs+1)
-        dims[2] = rand(nb_procs+1:5*nb_procs)
-    end
 
-    MPI.Barrier(comm)
+dims = MPIArray{Int}(comm, (nb_procs,), 2,)
 
-    nrows = dims[1]
-    ncols = dims[2]
+if rank == 0
+    dims[1] = rand(nb_procs:5*nb_procs+1)
+    dims[2] = rand(nb_procs+1:5*nb_procs)
+end
 
-    if rank == 0
-        println("Running ArrayBlock test with size $nrows×$ncols")
-    end
+MPI.Barrier(comm)
 
-    mat1 = MPIArray{Float64}(comm, (nb_procs,1), nrows, ncols)
-    forlocalpart!(rand!, mat1)
-    MPI.Barrier(comm)
+nrows = dims[1]
+ncols = dims[2]
 
-    localblock = mat1[localindices(mat1)...]
-    localmat = allocate(localblock)
-    getblock!(localmat, localblock)
-    forlocalpart(mat1) do A
-        @test(all(A .== localmat))
-    end
+if rank == 0
+    println("Running ArrayBlock test with size $nrows×$ncols")
+end
 
-    serial_mat2 = reshape(1:nrows*ncols,nrows,ncols)
-    mat2 = MPIArray{Int}(comm, (1,nb_procs), nrows, ncols)
-    forlocalpart!(mat2) do A
-        A .= serial_mat2[localindices(mat2)...]
-    end
+mat1 = MPIArray{Float64}(comm, (nb_procs,1), nrows, ncols)
+forlocalpart!(rand!, mat1)
+MPI.Barrier(comm)
 
-    MPI.Barrier(comm)
-    
-    fullblock = mat2[1:nrows, 1:ncols]
-    fullmat = allocate(fullblock)
-    getblock!(fullmat, fullblock)
-    @test all(fullmat .== serial_mat2)
+localblock = mat1[localindices(mat1)...]
+localmat = allocate(localblock)
+getblock!(localmat, localblock)
+forlocalpart(mat1) do A
+    @test(all(A .== localmat))
+end
 
-    MPI.Barrier(comm)
+serial_mat2 = reshape(1:nrows*ncols,nrows,ncols)
+mat2 = MPIArray{Int}(comm, (1,nb_procs), nrows, ncols)
+forlocalpart!(mat2) do A
+    A .= serial_mat2[localindices(mat2)...]
+end
 
-    forlocalpart!(mat2) do A
-        fill!(A,0)
-    end
+MPI.Barrier(comm)
 
-    MPI.Barrier(comm)
-    putblock!(fullmat, fullblock)
-    MPI.Barrier(comm)
+fullblock = mat2[1:nrows, 1:ncols]
+fullmat = allocate(fullblock)
+getblock!(fullmat, fullblock)
+@test all(fullmat .== serial_mat2)
 
-    forlocalpart!(mat2) do A
-        @test all(A .== serial_mat2[localindices(mat2)...])
-    end
+MPI.Barrier(comm)
 
-    MPI.Barrier(comm)
-    putblock!(fullmat, fullblock, +)
-    MPI.Barrier(comm)
+forlocalpart!(mat2) do A
+    fill!(A,0)
+end
 
-    forlocalpart!(mat2) do A
-        @test all(A .== serial_mat2[localindices(mat2)...] .* (nb_procs+1))
-    end
+MPI.Barrier(comm)
+putblock!(fullmat, fullblock)
+MPI.Barrier(comm)
+
+forlocalpart!(mat2) do A
+    @test all(A .== serial_mat2[localindices(mat2)...])
+end
+
+MPI.Barrier(comm)
+putblock!(fullmat, fullblock, +)
+MPI.Barrier(comm)
+
+forlocalpart!(mat2) do A
+    @test all(A .== serial_mat2[localindices(mat2)...] .* (nb_procs+1))
+end
+
 end
 
 @testset "Filter" begin
@@ -196,8 +206,10 @@ if localstart_before_filter > 25
     @test forlocalpart(lp -> length(lp) == 0, mpirange)
 end
 
-
 MPI.Barrier(comm)
+
+redist_range = redistribute(mpirange)
+@test forlocalpart(lp -> length(lp) >= 25 ÷ nb_procs, redist_range)
 
 end
 

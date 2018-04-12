@@ -1,6 +1,6 @@
 module MPIArrays
 
-export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free
+export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute
 
 using MPI
 using Compat
@@ -200,6 +200,19 @@ end
 Base.filter!(f,a::MPIArray{T,1}) where T = copy_into!(a, filter(f,a))
 
 function redistribute(a::MPIArray{T,N}, partition_sizes::Vararg{Any,N}) where {T,N}
+    rank = MPI.Comm_rank(a.comm)
+    @assert prod(length.(partition_sizes)) == MPI.Comm_size(a.comm)
+    partitioning = ContinuousPartitioning(partition_sizes...)
+    localarray = getblock(a[partitioning[rank+1]...])
+    return MPIArray(a.comm, localarray, length.(partition_sizes)...)
+end
+
+function redistribute(a::MPIArray{T,N}, nb_parts::Vararg{Int,N}) where {T,N}
+    return redistribute(a, distribute.(size(a), nb_parts)...)
+end
+
+function redistribute(a::MPIArray)
+    return redistribute(a, size(a.partitioning)...)
 end
 
 function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) where {T}
