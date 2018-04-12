@@ -186,6 +186,17 @@ filtered_range = filter(isodd, mpirange)
 @test length(filtered_range) == length(testrange) ÷ 2
 @test all(filtered_range .== filter(isodd, testrange))
 
+localstart_before_filter = localindices(mpirange)[1][1]
+
+MPI.Barrier(comm)
+
+filter!(x -> x <= 25, mpirange)
+
+if localstart_before_filter > 25
+    @test forlocalpart(lp -> length(lp) == 0, mpirange)
+end
+
+
 MPI.Barrier(comm)
 
 end

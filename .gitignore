@@ -2,4 +2,3 @@
 *.jl.*.cov
 *.jl.mem
 test/out-*.txt
-test/*.pdf

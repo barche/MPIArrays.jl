@@ -68,7 +68,7 @@ function distribute(nb_elems, parts)
     return [p <= remainder ? local_len+1 : local_len for p in 1:parts]
 end
 
-struct MPIArray{T,N} <: AbstractArray{T,N}
+mutable struct MPIArray{T,N} <: AbstractArray{T,N}
     sizes::NTuple{N,Int}
     localarray::Array{T,N}
     partitioning::ContinuousPartitioning{N}
@@ -180,6 +180,26 @@ end
 
 function Base.filter(f,a::MPIArray{T,1}) where T
     return MPIArray(forlocalpart(v -> filter(f,v), a), length(a.partitioning))
+end
+
+function Base.filter!(f,a::MPIArray)
+    error("filter is only supported on 1D MPIArrays")
+end
+
+function copy_into!(dest::MPIArray{T,N}, src::MPIArray{T,N}) where {T,N}
+    free(dest)
+    dest.sizes = src.sizes
+    dest.localarray = src.localarray
+    dest.partitioning = src.partitioning
+    dest.comm = src.comm
+    dest.win = src.win
+    dest.myrank = src.myrank
+    return dest
+end
+
+Base.filter!(f,a::MPIArray{T,1}) where T = copy_into!(a, filter(f,a))
+
+function redistribute(a::MPIArray{T,N}, partition_sizes::Vararg{Any,N}) where {T,N}
 end
 
 function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) where {T}
