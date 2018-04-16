@@ -17,11 +17,11 @@ function timed_mul(A::MPIArray,x::MPIArray)
         if rank == 0
             val, times[i], bytes, gctime, memallocs = @timed begin
                 b = A*x
-                MPI.Barrier(A.comm)
+                sync(b)
             end
         else
             b = A*x
-            MPI.Barrier(A.comm)
+            sync(b)
         end
         free(b)
     end
@@ -48,14 +48,14 @@ if rank == 0
     @test all(getblock(pres2[:]) .≈ ref)
 end
 
-MPI.Barrier(comm)
+sync(pres2)
 
 (mintime, maxtime) = timed_mul(A1,x)
 rank == 0 && write_timings("out-mpi.txt", 1, mintime, maxtime)
 (mintime, maxtime) = timed_mul(A2,x)
 rank == 0 && write_timings("out-mpi.txt", 2, mintime, maxtime)
 
-MPI.Barrier(comm)
+sync(pres2)
 
 end
 

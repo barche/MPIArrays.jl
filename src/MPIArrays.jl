@@ -1,6 +1,6 @@
 module MPIArrays
 
-export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute
+export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, sync
 
 using MPI
 using Compat
@@ -145,6 +145,13 @@ function Base.setindex!(a::MPIArray{T,N}, v, I::Vararg{Int, N}) where {T,N}
     MPI.Win_unlock(target_rank, a.win)
 end
 
+"""
+    sync(a::MPIArray)
+
+Collective call, making sure all operations modifying any part of the array are finished when it completes
+"""
+sync(a::MPIArray, ::Vararg{MPIArray, N}) where N = MPI.Barrier(a.comm)
+
 function Base.similar(a::MPIArray, ::Type{T}, dims::NTuple{N,Int}) where {T,N}
     old_partition_sizes = partition_sizes(a.partitioning)
     old_dims = size(a)
@@ -219,7 +226,7 @@ function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) whe
     forlocalpart!(y) do ly
         fill!(ly,zero(T))
     end
-    MPI.Barrier(y.comm)
+    sync(y)
     (rowrng,colrng) = localindices(A)
     my_b = getblock(b[colrng])
     yblock = y[rowrng]
@@ -228,7 +235,7 @@ function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) whe
         Base.A_mul_B!(my_y,my_A,my_b)
     end
     putblock!(my_y,yblock,+)
-    MPI.Barrier(y.comm)
+    sync(y)
     return y
 end
 
@@ -360,7 +367,7 @@ function putblock!(a::AbstractArray{T,N}, b::Block{T,N}, op::Function=_no_op) wh
 end
 
 function free(a::MPIArray{T,N}) where {T,N}
-    MPI.Barrier(a.comm)
+    sync(a)
     MPI.Win_free(a.win)
 end
 

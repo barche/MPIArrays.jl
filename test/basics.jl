@@ -34,11 +34,11 @@ function do_test(partitions::Vararg{Int,N}) where N
     A = MPIArray{Int}(comm, partitions, sizes...)
     forlocalpart!(lp -> lp .= serial_A[localindices(A, rank)...], A)
     @test all(A .== serial_A)
-    MPI.Barrier(comm)
+    sync(A)
     if rank == 1
         A .= serial_A
     end
-    MPI.Barrier(comm)
+    sync(A)
     @test all(A .== serial_A)
     return A
 end
@@ -57,8 +57,7 @@ end
 mat = do_test(p1, p2)
 
 ten = MPIArray{Float64}(comm, (1,1,nb_procs), 5,6,7)
-
-MPI.Barrier(comm)
+sync(ten)
 @test size(ten.partitioning) == (1,1,nb_procs)
 
 forlocalpart!(lp -> lp .= rank+1, vec)
@@ -66,8 +65,7 @@ forlocalpart!(lp -> lp .= rank+1, mat)
 MPI.Win_sync(mat.win)
 MPI.Win_sync(vec.win)
 
-
-MPI.Barrier(comm)
+sync(mat)
 
 ab1 = MPIArrays.Block(mat, 3:size(mat,1), 3:5)
 ab2 = MPIArrays.Block(mat, 1:4, 1:3)
@@ -83,11 +81,11 @@ if rank == 0
     println()
 end
 
-MPI.Barrier(comm)
+sync(mat)
 
 mat_redist = redistribute(mat, 1, nb_procs)
 
-MPI.Barrier(comm)
+sync(mat_redist)
 
 if rank == 0
     @test all(mat_redist .== mat)
@@ -102,7 +100,8 @@ sim2 = similar(mat, (10,))
 sim3 = similar(mat, (3,4,5))
 @test size(sim3) == (3,4,5)
 
-MPI.Barrier(comm)
+sync(sim3)
+
 end
 
 @testset "ArrayBlock" begin
@@ -114,7 +113,7 @@ if rank == 0
     dims[2] = rand(nb_procs+1:5*nb_procs)
 end
 
-MPI.Barrier(comm)
+sync(dims)
 
 nrows = dims[1]
 ncols = dims[2]
@@ -125,7 +124,7 @@ end
 
 mat1 = MPIArray{Float64}(comm, (nb_procs,1), nrows, ncols)
 forlocalpart!(rand!, mat1)
-MPI.Barrier(comm)
+sync(mat1)
 
 localblock = mat1[localindices(mat1)...]
 localmat = allocate(localblock)
@@ -140,30 +139,30 @@ forlocalpart!(mat2) do A
     A .= serial_mat2[localindices(mat2)...]
 end
 
-MPI.Barrier(comm)
+sync(mat2)
 
 fullblock = mat2[1:nrows, 1:ncols]
 fullmat = allocate(fullblock)
 getblock!(fullmat, fullblock)
 @test all(fullmat .== serial_mat2)
 
-MPI.Barrier(comm)
+sync(mat2)
 
 forlocalpart!(mat2) do A
     fill!(A,0)
 end
 
-MPI.Barrier(comm)
+sync(mat2)
 putblock!(fullmat, fullblock)
-MPI.Barrier(comm)
+sync(mat2)
 
 forlocalpart!(mat2) do A
     @test all(A .== serial_mat2[localindices(mat2)...])
 end
 
-MPI.Barrier(comm)
+sync(mat2)
 putblock!(fullmat, fullblock, +)
-MPI.Barrier(comm)
+sync(mat2)
 
 forlocalpart!(mat2) do A
     @test all(A .== serial_mat2[localindices(mat2)...] .* (nb_procs+1))
@@ -173,10 +172,9 @@ end
 
 @testset "Filter" begin
 
-MPI.Barrier(comm)
-
 localarray = fill(rank+1, 2*(rank+1))
 vec_from_local = MPIArray(localarray, nb_procs)
+sync(vec_from_local)
 @test size(vec_from_local) == (sum(1:nb_procs)*2,)
 @test forlocalpart(lp -> all(lp .== localarray), vec_from_local)
 
@@ -190,7 +188,7 @@ mpirange = MPIArray{Int}(length(testrange))
 if rank == 0
     putblock!(testrange,mpirange[:])
 end
-MPI.Barrier(comm)
+sync(mpirange)
 
 filtered_range = filter(isodd, mpirange)
 @test length(filtered_range) == length(testrange) ÷ 2
@@ -198,7 +196,7 @@ filtered_range = filter(isodd, mpirange)
 
 localstart_before_filter = localindices(mpirange)[1][1]
 
-MPI.Barrier(comm)
+sync(mpirange)
 
 filter!(x -> x <= 25, mpirange)
 
@@ -206,7 +204,7 @@ if localstart_before_filter > 25
     @test forlocalpart(lp -> length(lp) == 0, mpirange)
 end
 
-MPI.Barrier(comm)
+sync(mpirange)
 
 redist_range = redistribute(mpirange)
 @test forlocalpart(lp -> length(lp) >= 25 ÷ nb_procs, redist_range)
