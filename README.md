@@ -1,8 +1,3 @@
-<script src="/Users/bjanssens/.julia/v0.6/PlotlyJS/assets/plotly-latest.min.js">
-
-</script>
-
-
 # MPIArrays
 
 This package provides distributed arrays based on MPI one-sided communication primitives.
