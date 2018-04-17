@@ -102,6 +102,10 @@ sim3 = similar(mat, (3,4,5))
 
 sync(sim3)
 
+# test manual distribution
+distrib_vec = MPIArray{Int}(MPI.COMM_WORLD, fill(5, nb_procs), [10])
+@test size(distrib_vec) == (5*nb_procs, 10)
+
 end
 
 @testset "ArrayBlock" begin

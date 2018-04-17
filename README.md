@@ -6,12 +6,143 @@
 # MPIArrays
 
 This package provides distributed arrays based on MPI one-sided communication primitives.
+It is currently a proof-of-concept, only the functionality described in this readme is implemented
+so far.
+
+The following simple example shows how to multiply a matrix and a vector:
+
+```julia
+using MPI, MPIArrays
+
+MPI.Init()
+rank = MPI.Comm_rank(MPI.COMM_WORLD)
+N = 30 # size of the matrix
+
+# Create an uninitialized matrix and vector
+x = MPIArray{Float64}(N)
+A = MPIArray{Float64}(N,N)
+
+# Set random values
+forlocalpart!(rand!,x)
+forlocalpart!(rand!,A)
+
+# Make sure every process finished initializing the coefficients
+sync(A, x)
+
+b = A*x
+
+# This will print on the first process, using slow element-by-element communication, but that's OK to print to screen
+rank == 0 && println("Matvec result: $b")
+
+# Clean up
+free(A)
+free(x)
+MPI.Finalize()
+```
 
 ## Construction
 
+The constructors always create uninitialized arrays. In the most basic form, only the array size is needed as argument:
+
+```julia
+x = MPIArray{Int}(5,5)
+```
+
+This will distribute the first array dimension evenly over the number of processes in the `MPI.COMM_WORLD` communicator.
+
+It is also possible to specify the number of partitions in each direction, e.g. to
+create a 20 × 20 matrix with 2 partitions in each direction:
+
+```julia
+x = MPIArray{Int}(MPI.COMM_WORLD, (2,2), 20,20)
+```
+
+The above constructors automatically distribute the total number of elements in each direction in a uniform way. It is also possible to manually specify the number of elements in each partition in each direction:
+
+```julia
+x = MPIArray{Int}(MPI.COMM_WORLD, [7,3], [10])
+```
+
+This will create a 10 × 10 distributed array, with 7 rows on the first processor and 3 on the second.
+
+Finally, a distributed array can be constructed from predefined local parts:
+
+```julia
+x = MPIArray{Int}([1,2,3], 4)
+```
+
+This will produce a distributed array with 4 partitions, each containing `[1,2,3]`
+
 ## Manipulation
 
+The array interface is implemented, including normal indexing operations. Note that these lock and unlock the MPI window on each call, and are therefore expensive. The advantage of having these operations defined is mainly for convenient access to utility functions such as I/O.
+
+Other supported operations from Base are `Base.A_mul_B!` for Matrix-vector product and `Base.filter` and `Base.filter!`
+
+### Utility operations
+
+A tuple containing the locally-owned index range can be obtained using `localindices`, with the rank as an optional argument to get the range on a rank other than the current rank. Calling `free` on an array will destroy the underlying MPI Window. This must be done manually, since there is no guarantee that garbage-collection will happen at the same time on all processes, so it is dangerous to place the collective call to destroy the window in a finalizer. To make all processes wait, call `sync` with one or more MPIArrays as argument. Currently this just calls `MPI.Barrier` on the array communicator.
+
+### Accessing local data
+
+Local data can be accessed using the `forlocalpart` function, which executes the function in the first argument on the local data of the array in the second argument, so it is compatible with the `do`-block syntax:
+
+```julia
+# Fill the local part with random numbers
+forlocalpart!(rand!, A)
+
+# Sum up the local part
+localsum = forlocalpart(A) do lp
+  result = zero(eltype(lp))
+  for x in lp
+    result += x
+  end
+  return result
+end
+```
+
+### Redistributing data
+
+Data can be redistributed among processes as follows:
+
+```julia
+# Initial tiled distribution over 4 processes:
+A = MPIArray{Int}(comm, (2, 2), N, N)
+# Non-uniform redistribution, with one column on the first processor and the rest on the last:
+redistribute!(A, [N], [1,0,0,N-1])
+# Restore equal distribution over the columns:
+redistribute!(A)
+```
+See also `examples/redist.jl`.
+
 ## Blocks
+
+The `Block` type helps in accessing off-processor data, since individual element access is too expensive. Blocks are created using the indexing operators using range arguments, e.g.:
+
+```julia
+Ablock = A[1:3, 2:6]
+```
+
+The block will not yet contain data, it just refers to the global index range `(1:3, 2:6)` and keeps track of the processes involved. To actually read the data, also allocating an array for the storage:
+
+```julia
+Amat = getblock(Ablock)
+```
+
+It's also possible to just allocate the matrix and fill it in a separate step:
+
+```julia
+Amat = allocate(Ablock)
+getblock!(Amat, Ablock)
+```
+
+After modifying entries in an array associated with a block, the data can be sent back to the other processes:
+
+```julia
+Amat = allocate(Ablock)
+rand!(Amat)
+putblock!(Amat, Ablock)
+```
 
 ## Benchmark
 

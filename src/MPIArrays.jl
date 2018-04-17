@@ -1,6 +1,6 @@
 module MPIArrays
 
-export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, sync
+export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync
 
 using MPI
 using Compat
@@ -221,6 +221,9 @@ end
 function redistribute(a::MPIArray)
     return redistribute(a, size(a.partitioning)...)
 end
+
+redistribute!(a::MPIArray{T,N}, partition_sizes::Vararg{Any,N})  where {T,N} = copy_into!(a, redistribute(a, partition_sizes...))
+redistribute!(a::MPIArray) = redistribute!(a, size(a.partitioning)...)
 
 function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) where {T}
     forlocalpart!(y) do ly
