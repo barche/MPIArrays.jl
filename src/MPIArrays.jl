@@ -76,7 +76,7 @@ mutable struct MPIArray{T,N} <: AbstractArray{T,N}
     win::MPI.Win
     myrank::Int
 
-    function MPIArray{T}(comm::MPI.Comm, partition_sizes::Vararg{Any,N}) where {T,N}
+    function MPIArray{T}(comm::MPI.Comm, partition_sizes::Vararg{AbstractVector{<:Integer},N}) where {T,N}
         nb_procs = MPI.Comm_size(comm)
         rank = MPI.Comm_rank(comm)
         partitioning = ContinuousPartitioning(partition_sizes...)
@@ -88,14 +88,14 @@ mutable struct MPIArray{T,N} <: AbstractArray{T,N}
         return new{T,N}(sizes, localarray, partitioning, comm, win, rank)
     end
 
-    MPIArray{T}(sizes::Vararg{Int,N}) where {T,N} = MPIArray{T}(MPI.COMM_WORLD, (MPI.Comm_size(MPI.COMM_WORLD), ones(Int,N-1)...), sizes...)
-    MPIArray{T}(comm::MPI.Comm, partitions::NTuple{N,Int}, sizes::Vararg{Int,N}) where {T,N} = MPIArray{T}(comm, distribute.(sizes, partitions)...)
+    MPIArray{T}(sizes::Vararg{<:Integer,N}) where {T,N} = MPIArray{T}(MPI.COMM_WORLD, (MPI.Comm_size(MPI.COMM_WORLD), ones(Int,N-1)...), sizes...)
+    MPIArray{T}(comm::MPI.Comm, partitions::NTuple{N,<:Integer}, sizes::Vararg{<:Integer,N}) where {T,N} = MPIArray{T}(comm, distribute.(sizes, partitions)...)
 
-    function MPIArray(comm::MPI.Comm, localarray::Array{T,N}, nb_partitions::Vararg{Int,N}) where {T,N}
+    function MPIArray(comm::MPI.Comm, localarray::Array{T,N}, nb_partitions::Vararg{<:Integer,N}) where {T,N}
         nb_procs = MPI.Comm_size(comm)
         rank = MPI.Comm_rank(comm)
         
-        partition_size_array = reshape(MPI.Allgather(size(localarray), comm), nb_partitions...)
+        partition_size_array = reshape(MPI.Allgather(size(localarray), comm), Int.(nb_partitions)...)
 
         partition_sizes = ntuple(N) do dim
             idx = ntuple(i -> i == dim ? Colon() : 1,N)
@@ -108,7 +108,7 @@ mutable struct MPIArray{T,N} <: AbstractArray{T,N}
         return result
     end
 
-    MPIArray(localarray::Array{T,N}, nb_partitions::Vararg{Int,N}) where {T,N} = MPIArray(MPI.COMM_WORLD, localarray, nb_partitions...)
+    MPIArray(localarray::Array{T,N}, nb_partitions::Vararg{<:Integer,N}) where {T,N} = MPIArray(MPI.COMM_WORLD, localarray, nb_partitions...)
 end
 
 
