@@ -1,6 +1,6 @@
 module MPIArrays
 
-export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync
+export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync, GlobalBlock
 
 using MPI
 using Compat
@@ -373,5 +373,19 @@ function free(a::MPIArray{T,N}) where {T,N}
     sync(a)
     MPI.Win_free(a.win)
 end
+
+using CustomUnitRanges: filename_for_urange
+include(filename_for_urange)
+
+struct GlobalBlock{T,N} <: AbstractArray{T,N}
+    array::Array{T,N}
+    block::Block{T,N}
+end
+
+Base.IndexStyle(::Type{GlobalBlock{T,N}}) where {T,N} = IndexCartesian()
+Base.indices(gb::GlobalBlock) = URange.(first.(gb.block.ranges), last.(gb.block.ranges))
+@inline _convert_idx(rng, I) = I .- first.(rng) .+ 1
+Base.getindex(gb::GlobalBlock{T,N}, I::Vararg{Int, N}) where {T,N} = gb.array[_convert_idx(gb.block.ranges, I)...]
+Base.setindex!(gb::GlobalBlock{T,N}, value, I::Vararg{Int, N}) where {T,N} = (gb.array[_convert_idx(gb.block.ranges, I)...] = value)
 
 end # module

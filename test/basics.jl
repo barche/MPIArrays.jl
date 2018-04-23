@@ -137,6 +137,12 @@ forlocalpart(mat1) do A
     @test(all(A .== localmat))
 end
 
+gb = GlobalBlock(localmat, localblock)
+
+for (I,J) in zip(eachindex(gb), eachindex(localmat))
+    @test gb[I] == localmat[J]
+end
+
 serial_mat2 = reshape(1:nrows*ncols,nrows,ncols)
 mat2 = MPIArray{Int}(comm, (1,nb_procs), nrows, ncols)
 forlocalpart!(mat2) do A
