@@ -143,6 +143,16 @@ for (I,J) in zip(eachindex(gb), eachindex(localmat))
     @test gb[I] == localmat[J]
 end
 
+ghosted = GhostedBlock(mat1)
+for I in eachindex(mat1)
+    push!(ghosted, I)
+end
+sort!(ghosted)
+sync(ghosted)
+for I in eachindex(mat1)
+    @test mat1[I] == getglobal(ghosted,I)
+end
+
 serial_mat2 = reshape(1:nrows*ncols,nrows,ncols)
 mat2 = MPIArray{Int}(comm, (1,nb_procs), nrows, ncols)
 forlocalpart!(mat2) do A

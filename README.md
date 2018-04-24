@@ -147,6 +147,23 @@ Since a `Block` just refers to a regular Julia array, the indexing is local to t
 gb = GlobalBlock(Amat, Ablock)
 ```
 
+### Ghost nodes
+
+A `GhostedBlock` allows periodic reading of off-processor data in arbitrary locations in the array. The `push!` method adds new indices, while `sort!` ensures that fetching the data (using `sync`) happens in the minimal number of MPI calls. The `getglobal` function gets an array value that is either part of the local data or a ghost, using its global array indices.
+
+```julia
+ghosted = GhostedBlock(A)
+push!(ghosted, 1,1)
+push!(ghosted, 3,2)
+sort!(ghosted)
+# Fetch off-processor data:
+sync(ghosted)
+# Show all ghosts:
+@show ghosted
+# Get an entry using its global indices, if part of the local data or ghosts:
+@show getglobal(ghosted, 1, 1)
+```
+
 ## Benchmark
 
 As a simple test, the timings of a matrix-vector product were recorded for a range of processes and BLAS threads, and compared to the `Base.Array` and [DistributedArrays.jl](https://github.com/JuliaParallel/DistributedArrays.jl) performance. We also compared the effect of distributing either the rows or the columns. The code for the tests is in `tests/matmul_*.jl`. The results below are for a square matrix of size `N=15000`, using up to 8 machines with 2 Intel E5-2698 v4 CPUs, i.e. 32 cores per machine and using TCP over 10 Gbit ethernet between machines. Using `OPENBLAS_NUM_THREADS=1` and one MPI process per machine this yields the following timings:

@@ -1,6 +1,6 @@
 module MPIArrays
 
-export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync, GlobalBlock
+export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync, GlobalBlock, GhostedBlock, getglobal
 
 using MPI
 using Compat
@@ -387,5 +387,97 @@ Base.indices(gb::GlobalBlock) = URange.(first.(gb.block.ranges), last.(gb.block.
 @inline _convert_idx(rng, I) = I .- first.(rng) .+ 1
 Base.getindex(gb::GlobalBlock{T,N}, I::Vararg{Int, N}) where {T,N} = gb.array[_convert_idx(gb.block.ranges, I)...]
 Base.setindex!(gb::GlobalBlock{T,N}, value, I::Vararg{Int, N}) where {T,N} = (gb.array[_convert_idx(gb.block.ranges, I)...] = value)
+
+"""
+Read-only block, providing access to the local data and an arbitrary number of off-processer entries.
+This is a vector because the represented region is not necessarily square
+"""
+struct GhostedBlock{T,N} <: AbstractArray{T,1}
+    array::MPIArray{T,N}
+    globaltolocal::Dict{Int, Int}
+    localtoglobal::Vector{Int}
+    ghostvalues::Vector{T}
+
+    GhostedBlock(a::MPIArray{T,N}) where {T,N} = new{T,N}(a, Dict{Int,Int}(), Vector{Int}(), Vector{T}())
+end
+
+Base.IndexStyle(::Type{GhostedBlock{T,N}}) where {T,N} = IndexLinear()
+Base.size(b::GhostedBlock) = size(b.localtoglobal)
+Base.getindex(b::GhostedBlock, i) = b.ghostvalues[i]
+
+"""
+Get a value using a global index. Returns an error if I is not part of the local array or the ghosted nodes
+"""
+function getglobal(b::GhostedBlock{T,N}, I::Vararg{Int,N}) where {T,N}
+    if all(I .∈ localindices(b.array))
+        return b.array.localarray[_convert_idx(localindices(b.array), I)...]
+    end
+
+    return b.ghostvalues[b.globaltolocal[LinearIndices(b.array)[I...]]]
+end
+getglobal(b::GhostedBlock{T,N}, I::CartesianIndex{N}) where {T,N} = getglobal(b, I.I...)
+
+"""
+Register the given index as a ghost, if it is not a local node or already registered
+"""
+function Base.push!(b::GhostedBlock{T,N}, I::Vararg{Int,N}) where{T,N}
+    gid = LinearIndices(b.array)[I...]
+    if all(I .∈ localindices(b.array)) || gid ∈ keys(b.globaltolocal)
+        return b
+    end
+    
+    push!(b.localtoglobal, gid)
+    newidx = length(b.localtoglobal)
+    resize!(b.ghostvalues, newidx)
+    b.globaltolocal[gid] = newidx
+
+    return b
+end
+Base.push!(b::GhostedBlock{T,N}, I::CartesianIndex{N}) where{T,N} = push!(b, I.I...)
+
+"""
+Sort the indices, so that they are contiguous per rank. Does not sort the data
+"""
+function Base.sort!(b::GhostedBlock)
+    sort!(b.localtoglobal)
+    for (i,gid) in enumerate(b.localtoglobal)
+        @assert gid ∈ keys(b.globaltolocal)
+        b.globaltolocal[gid] = i
+    end
+end
+
+"""
+Fetch the local data
+"""
+function sync(b::GhostedBlock)
+    tocart = CartesianIndices(b.array)
+    i = 1
+    nb_ghosts = length(b.localtoglobal)
+    if nb_ghosts == 0
+        return
+    end
+    (newrank, lid) = local_index(b.array.partitioning, tocart[b.localtoglobal[i]].I)
+    while i <= nb_ghosts
+        lockedrank = newrank
+        MPI.Win_lock(MPI.LOCK_SHARED, newrank, 0, b.array.win)
+        while newrank == lockedrank && i <= nb_ghosts
+            saved_i = i
+            rngstart = lid
+            rngend = lid
+            i += 1
+            while i <= nb_ghosts
+                (newrank, lid) = local_index(b.array.partitioning, tocart[b.localtoglobal[i]].I)
+                if (lid - rngend) == 1 && newrank == lockedrank
+                    rngend = lid
+                    i += 1
+                else
+                    break
+                end
+            end
+            MPI.Get(pointer(b.ghostvalues,saved_i), rngend-rngstart+1, lockedrank, rngstart, b.array.win)
+        end
+        MPI.Win_unlock(lockedrank, b.array.win)
+    end
+end
 
 end # module
