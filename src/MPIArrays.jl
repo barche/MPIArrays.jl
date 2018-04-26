@@ -1,6 +1,6 @@
 module MPIArrays
 
-export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync, GlobalBlock, GhostedBlock, getglobal
+export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync, GlobalBlock, GhostedBlock, getglobal, globaltolocal, globalids
 
 using MPI
 using Compat
@@ -401,20 +401,59 @@ struct GhostedBlock{T,N} <: AbstractArray{T,1}
     GhostedBlock(a::MPIArray{T,N}) where {T,N} = new{T,N}(a, Dict{Int,Int}(), Vector{Int}(), Vector{T}())
 end
 
+"""
+Construct a sorted GhostedBlock that contains all the given gids
+"""
+function GhostedBlock(a::MPIArray, gids)
+    gb = GhostedBlock(a)
+    for gid in gids
+        push!(gb,gid)
+    end
+    sort!(gb)
+    sync(gb)
+    return gb
+end
+
 Base.IndexStyle(::Type{GhostedBlock{T,N}}) where {T,N} = IndexLinear()
-Base.size(b::GhostedBlock) = size(b.localtoglobal)
-Base.getindex(b::GhostedBlock, i) = b.ghostvalues[i]
+Base.size(b::GhostedBlock) = (length(b.array.localarray) + length(b.localtoglobal),)
+function Base.getindex(b::GhostedBlock, i)
+    loclen = length(b.array.localarray)
+    if i <= loclen
+        return b.array.localarray[i]
+    end
+    return b.ghostvalues[i-loclen]
+end
+
+"""
+Convert a global index to a local linear index into the union of the local and ghosted nodes
+"""
+globaltolocal(b::GhostedBlock, gid::Integer) = globaltolocal(b, CartesianIndices(b.array)[gid])
+function globaltolocal(b::GhostedBlock{T,N}, I::CartesianIndex{N}) where {T,N}
+    locinds = localindices(b.array)
+    if all(I.I .∈ locinds)
+        return LinearIndices(b.array.localarray)[_convert_idx(locinds, I.I)...]
+    end
+    return length(b.array.localarray) + b.globaltolocal[LinearIndices(b.array)[I]]
+end
+
+"""
+Linear list of all the global IDs referred by the GhostedBlock, starting with the local nodes and with the ghosts at the end
+"""
+function globalids(b::GhostedBlock)
+    local_len = length(b.array.localarray)
+    result = Vector{Int}(local_len + length(b.localtoglobal))
+    li = LinearIndices(b.array)
+    for (i,I) in enumerate(CartesianIndices(localindices(b.array)))
+        result[i] = li[I]
+    end
+    copy!(result, local_len+1, b.localtoglobal, 1, length(b.localtoglobal))
+    return result
+end
 
 """
 Get a value using a global index. Returns an error if I is not part of the local array or the ghosted nodes
 """
-function getglobal(b::GhostedBlock{T,N}, I::Vararg{Int,N}) where {T,N}
-    if all(I .∈ localindices(b.array))
-        return b.array.localarray[_convert_idx(localindices(b.array), I)...]
-    end
-
-    return b.ghostvalues[b.globaltolocal[LinearIndices(b.array)[I...]]]
-end
+getglobal(b::GhostedBlock{T,N}, I::Vararg{Int,N}) where {T,N} = b[globaltolocal(b, CartesianIndex(I...))]
 getglobal(b::GhostedBlock{T,N}, I::CartesianIndex{N}) where {T,N} = getglobal(b, I.I...)
 
 """
