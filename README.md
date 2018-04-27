@@ -174,9 +174,12 @@ The timings using one MPI process per machine and `OPENBLAS_NUM_THREADS=32` are:
 
 ![Multi-threaded](benchmarks/multithread.svg "32 threads per process")
 
+For the single-threaded case, we also compare with the C++ library [Elemental](https://github.com/elemental/Elemental), using their unmodified [Gemv example](https://github.com/elemental/Elemental/blob/master/examples/blas_like/Gemv.cpp) with matrix size parameter 15000 and the same OpenBLAS as Julia.
+
 Some observations:
 1. Using a single process, both `DArray` and `MPIArray` perform at the same level as `Base.Array`, indicating that the overhead of the parallel structures that ultimately wrap a per-process array is negligible. This is reassuring, since just using parallel structures won't slow down the serial case and the code can be the same in all cases.
 2. Without threading, the scaling breaks down even before multiple machines come into play. At 256 processes, there is even a severe breakdown of the performance. This may be because each process attempts to communicate with each off-machine process over TCP, rather than pooling the communications between machines. `DArray` seems to tolerate this better than MPI.
 3. Using hybrid parallelism, where threads are used to communicate within each machine and MPI or Julia's native parallelism between machines is much faster. For MPI, the scaling is almost ideal with the number of machines, but for `DArray` the results are more erratic.
 4. It is better to distribute the matrix columns, at least for this dense matrix matrix-vector product.
 5. The `Base.Array` product with `OPENBLAS_NUM_THREADS=32` completes in about 40 ms, while the MPI version on 32 cores on the same machine completes in 18 ms. This suggests there is room for improvement in the threading implementation. On the other hand, the 32 MPI processes are no faster than 16 MPI processes on the same machine, indicating a possible memory bottleneck for this problem.
+6. Even though the Julia implementation is quite simple, it compares favorably with a mature C++ library, with an apparent better scaling starting at 32 processes, though we did not investigate the cause of this and it may be possible to get better performance by tweaking Elemental settings.

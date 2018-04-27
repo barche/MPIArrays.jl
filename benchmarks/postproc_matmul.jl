@@ -3,6 +3,7 @@ using Plots
 const serial = readdlm("out-serial.txt")
 const darray = readdlm("out-darray.txt")
 const mpi = readdlm("out-mpi.txt")
+const elemental = readdlm("out-elemental.txt")
 
 # column indices
 const procs = 1
@@ -29,7 +30,6 @@ function plotcols(data, xcol, ycol; kwargs...)
 end
 
 function plot_comparison(darray_filt, mpi_filt, serial_filt_time, filename, legpos)
-  plot()
   plotcols(filter(ddim, 1, darray_filt), procs, mintime, label="DArray, rows", marker=:square)
   plotcols(filter(ddim, 2, darray_filt), procs, mintime, label="DArray, cols", marker=:square)
   plotcols(filter(ddim, 1, mpi_filt), procs, mintime, label="MPI, rows", marker=:circle)
@@ -41,7 +41,10 @@ end
 
 plotlyjs()
 
+plotcols(filter(threads,1,elemental), procs, mintime, label="Elemental", marker=:hex)
 plot_comparison(filter(threads,1,darray), filter(threads,1,mpi), minimum(filter(threads, 1, serial)[:,mintime]), "singlethread.svg", :top)
+
+plot()
 plot_comparison(filter(threads,32,darray), filter(threads,32,mpi), minimum(filter(threads, 32, serial)[:,mintime]), "multithread.svg", :topright)
 
 
