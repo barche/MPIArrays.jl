@@ -57,8 +57,6 @@ function partition_sizes(p::ContinuousPartitioning)
     return result
 end
 
-@inline to_one_based(I, ranges) = I .- first.(ranges) .+ 1
-
 """
   (private method)
 
@@ -66,8 +64,8 @@ Get the rank and local 0-based index
 """
 function local_index(p::ContinuousPartitioning, I::NTuple{N,Int}) where {N}
     proc_indices = searchsortedfirst.(p.index_ends, I)
-    ind_ranges = p[proc_indices...]
-    return (p.ranks[proc_indices...]-1, LinearIndices(ind_ranges)[to_one_based(I, ind_ranges)...]-1)
+    lininds = LinearIndices(Base.Slice.(p[proc_indices...]))
+    return (p.ranks[proc_indices...]-1, lininds[I...] - first(lininds))
 end
 
 # Evenly distribute nb_elems over parts partitions
