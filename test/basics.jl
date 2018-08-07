@@ -1,7 +1,7 @@
 using MPI
 using MPIArrays
-using Base.Test
-using Compat
+using Test
+using Random
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -10,13 +10,12 @@ const nb_procs = MPI.Comm_size(comm)
 
 if rank == 0
 @testset "Partitioning" begin
-
-const matpart = MPIArrays.ContinuousPartitioning([2,5,3], [2,3])
+matpart = MPIArrays.ContinuousPartitioning([2,5,3], [2,3])
 @test matpart[1,1] == (1:2,1:2)
 @test matpart[3,2] == (8:10,3:5)
 @test MPIArrays.partition_sizes(matpart) == ([2,5,3], [2,3])
 
-const vecpart = MPIArrays.ContinuousPartitioning([2,5,3])
+vecpart = MPIArrays.ContinuousPartitioning([2,5,3])
 @test vecpart[1] == (1:2,)
 @test vecpart[2] == (3:7,)
 @test vecpart[3] == (8:10,)

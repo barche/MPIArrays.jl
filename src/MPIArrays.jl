@@ -3,7 +3,7 @@ module MPIArrays
 export MPIArray, localindices, getblock, getblock!, putblock!, allocate, forlocalpart, forlocalpart!, free, redistribute, redistribute!, sync, GlobalBlock, GhostedBlock, getglobal, globaltolocal, globalids
 
 using MPI
-using Compat
+import LinearAlgebra
 
 """
 Store the distribution of the array indices over the different partitions.
@@ -26,8 +26,8 @@ struct ContinuousPartitioning{N} <: AbstractArray{Int,N}
     index_ends::NTuple{N,Vector{Int}}
 
     function ContinuousPartitioning(partition_sizes::Vararg{Any,N}) where {N}
-        index_starts = Vector{Int}.(length.(partition_sizes))
-        index_ends = Vector{Int}.(length.(partition_sizes))
+        index_starts = Vector{Int}.(undef,length.(partition_sizes))
+        index_ends = Vector{Int}.(undef,length.(partition_sizes))
         for (idxstart,idxend,nb_elems_dist) in zip(index_starts,index_ends,partition_sizes)
             currentstart = 1
             currentend = 0
@@ -49,7 +49,15 @@ Base.size(p::ContinuousPartitioning) = length.(p.index_starts)
     return UnitRange.(getindex.(p.index_starts,I), getindex.(p.index_ends,I))
 end
 
-partition_sizes(p::ContinuousPartitioning) = (p.index_ends .- p.index_starts .+ 1)
+function partition_sizes(p::ContinuousPartitioning)
+    result = (p.index_ends .- p.index_starts)
+    for v in result
+        v .+= 1
+    end
+    return result
+end
+
+@inline to_one_based(I, ranges) = I .- first.(ranges) .+ 1
 
 """
   (private method)
@@ -58,7 +66,8 @@ Get the rank and local 0-based index
 """
 function local_index(p::ContinuousPartitioning, I::NTuple{N,Int}) where {N}
     proc_indices = searchsortedfirst.(p.index_ends, I)
-    return (p.ranks[proc_indices...]-1, LinearIndices(p[proc_indices...])[I...]-1)
+    ind_ranges = p[proc_indices...]
+    return (p.ranks[proc_indices...]-1, LinearIndices(ind_ranges)[to_one_based(I, ind_ranges)...]-1)
 end
 
 # Evenly distribute nb_elems over parts partitions
@@ -81,7 +90,7 @@ mutable struct MPIArray{T,N} <: AbstractArray{T,N}
         rank = MPI.Comm_rank(comm)
         partitioning = ContinuousPartitioning(partition_sizes...)
 
-        localarray = Array{T}(length.(partitioning[rank+1]))
+        localarray = Array{T}(undef,length.(partitioning[rank+1]))
         win = MPI.Win()
         MPI.Win_create(localarray, MPI.INFO_NULL, comm, win)
         sizes = sum.(partition_sizes)
@@ -225,7 +234,7 @@ end
 redistribute!(a::MPIArray{T,N}, partition_sizes::Vararg{Any,N})  where {T,N} = copy_into!(a, redistribute(a, partition_sizes...))
 redistribute!(a::MPIArray) = redistribute!(a, size(a.partitioning)...)
 
-function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) where {T}
+function LinearAlgebra.mul!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) where {T}
     forlocalpart!(y) do ly
         fill!(ly,zero(T))
     end
@@ -235,7 +244,7 @@ function Base.A_mul_B!(y::MPIArray{T,1}, A::MPIArray{T,2}, b::MPIArray{T,1}) whe
     yblock = y[rowrng]
     my_y = allocate(yblock)
     forlocalpart(A) do my_A
-        Base.A_mul_B!(my_y,my_A,my_b)
+        LinearAlgebra.mul!(my_y,my_A,my_b)
     end
     putblock!(my_y,yblock,+)
     sync(y)
@@ -274,8 +283,8 @@ function forlocalpart!(f, a::MPIArray)
 end
 
 function linear_ranges(indexblock)
-    cr = CartesianIndices(indices(indexblock)[2:end])
-    result = Vector{UnitRange{Int}}(length(cr))
+    cr = CartesianIndices(axes(indexblock)[2:end])
+    result = Vector{UnitRange{Int}}(undef,length(cr))
 
     for (i,carti) in enumerate(cr)
         linrange = indexblock[:,carti]
@@ -299,21 +308,21 @@ struct Block{T,N}
 end
 
 Base.getindex(a::MPIArray{T,N}, I::Vararg{UnitRange{Int},N}) where {T,N} = Block(a,I...)
-Base.getindex(a::MPIArray{T,N}, I::Vararg{Colon,N}) where {T,N} = Block(a,indices(a)...)
+Base.getindex(a::MPIArray{T,N}, I::Vararg{Colon,N}) where {T,N} = Block(a,axes(a)...)
 
 
 """
 Allocate a local array with the size to fit the block
 """
-allocate(b::Block{T,N}) where {T,N} = Array{T}(length.(b.ranges))
+allocate(b::Block{T,N}) where {T,N} = Array{T}(undef,length.(b.ranges))
 
 function blockloop(a::AbstractArray{T,N}, b::Block{T,N}, locktype::MPI.LockType, localfun, mpifun) where {T,N}
     for rankindex in b.targetrankindices
         r = b.array.partitioning.ranks[rankindex] - 1
         localinds = localindices(b.array,r)
         globalrange = b.ranges .∩ localinds
-        a_range = globalrange .- first.(b.ranges) .+ 1
-        b_range = globalrange .- first.(localinds) .+ 1
+        a_range = map((g,r) -> g .- first(r) .+ 1, globalrange, b.ranges)
+        b_range = map((g,r) -> g .- first(r) .+ 1, globalrange, localinds)
         MPI.Win_lock(locktype, r, 0, b.array.win)
         if r == b.array.myrank
             localfun(a, a_range, b.array.localarray, b_range)
@@ -383,10 +392,11 @@ struct GlobalBlock{T,N} <: AbstractArray{T,N}
 end
 
 Base.IndexStyle(::Type{GlobalBlock{T,N}}) where {T,N} = IndexCartesian()
-Base.indices(gb::GlobalBlock) = URange.(first.(gb.block.ranges), last.(gb.block.ranges))
+Base.axes(gb::GlobalBlock) = URange.(first.(gb.block.ranges), last.(gb.block.ranges))
 @inline _convert_idx(rng, I) = I .- first.(rng) .+ 1
 Base.getindex(gb::GlobalBlock{T,N}, I::Vararg{Int, N}) where {T,N} = gb.array[_convert_idx(gb.block.ranges, I)...]
 Base.setindex!(gb::GlobalBlock{T,N}, value, I::Vararg{Int, N}) where {T,N} = (gb.array[_convert_idx(gb.block.ranges, I)...] = value)
+Base.size(gb::GlobalBlock) = last.(gb.block.ranges), first.(gb.block.ranges)
 
 """
 Read-only block, providing access to the local data and an arbitrary number of off-processer entries.
@@ -403,11 +413,22 @@ end
 
 """
 Construct a sorted GhostedBlock that contains all the given gids
+The passed list of gids may contain duplicates
 """
-function GhostedBlock(a::MPIArray, gids)
+function GhostedBlock(a::MPIArray{T,1}, gids) where T
     gb = GhostedBlock(a)
+    locinds = localindices(a)[1]
+    nb_unique = 0
     for gid in gids
-        push!(gb,gid)
+        if !(gid ∈ locinds || haskey(gb.globaltolocal, gid))
+            nb_unique += 1
+            gb.globaltolocal[gid] = nb_unique
+        end
+    end
+    resize!(gb.localtoglobal, nb_unique)
+    resize!(gb.ghostvalues, nb_unique)
+    for (gid,i) in gb.globaltolocal
+        gb.localtoglobal[i] = gid
     end
     sort!(gb)
     sync(gb)
@@ -427,7 +448,7 @@ end
 """
 Convert a global index to a local linear index into the union of the local and ghosted nodes
 """
-globaltolocal(b::GhostedBlock, gid::Integer) = globaltolocal(b, CartesianIndices(b.array)[gid])
+globaltolocal(b::GhostedBlock{T,N}, gid::Integer) where {T,N} = globaltolocal(b, CartesianIndices(b.array)[gid])
 function globaltolocal(b::GhostedBlock{T,N}, I::CartesianIndex{N}) where {T,N}
     locinds = localindices(b.array)
     if all(I.I .∈ locinds)
@@ -436,12 +457,20 @@ function globaltolocal(b::GhostedBlock{T,N}, I::CartesianIndex{N}) where {T,N}
     return length(b.array.localarray) + b.globaltolocal[LinearIndices(b.array)[I]]
 end
 
+function globaltolocal(b::GhostedBlock{T,1}, gid::Integer) where {T}
+    locinds = localindices(b.array)[1]
+    if gid ∈ locinds
+        return gid - first(locinds) + 1
+    end
+    return length(b.array.localarray) + b.globaltolocal[gid]
+end
+
 """
 Linear list of all the global IDs referred by the GhostedBlock, starting with the local nodes and with the ghosts at the end
 """
 function globalids(b::GhostedBlock)
     local_len = length(b.array.localarray)
-    result = Vector{Int}(local_len + length(b.localtoglobal))
+    result = Vector{Int}(undef, local_len + length(b.localtoglobal))
     li = LinearIndices(b.array)
     for (i,I) in enumerate(CartesianIndices(localindices(b.array)))
         result[i] = li[I]
@@ -453,8 +482,9 @@ end
 """
 Get a value using a global index. Returns an error if I is not part of the local array or the ghosted nodes
 """
-getglobal(b::GhostedBlock{T,N}, I::Vararg{Int,N}) where {T,N} = b[globaltolocal(b, CartesianIndex(I...))]
+getglobal(b::GhostedBlock{T,N}, I::Vararg{Integer,N}) where {T,N} = b[globaltolocal(b, CartesianIndex(I...))]
 getglobal(b::GhostedBlock{T,N}, I::CartesianIndex{N}) where {T,N} = getglobal(b, I.I...)
+getglobal(b::GhostedBlock{T,1}, i::Integer) where {T} = b[globaltolocal(b, i)]
 
 """
 Register the given index as a ghost, if it is not a local node or already registered

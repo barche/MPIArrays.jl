@@ -1,6 +1,6 @@
 using MPI
 using MPIArrays
-using Base.Test
+using Test
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -30,9 +30,9 @@ end
 
 @testset "MatMul" begin
 
-const A1 = MPIArray{Float64}(comm, (nb_procs,1), N, N)
-const A2 = MPIArray{Float64}(comm, (1,nb_procs), N, N)
-const x = MPIArray{Float64}(comm, (nb_procs,), N)
+A1 = MPIArray{Float64}(comm, (nb_procs,1), N, N)
+A2 = MPIArray{Float64}(comm, (1,nb_procs), N, N)
+x = MPIArray{Float64}(comm, (nb_procs,), N)
 
 if rank == 0
     putblock!(As,A1[:,:])
@@ -40,8 +40,8 @@ if rank == 0
     putblock!(xs,x[:])
 end
 
-const pres1 = A1*x
-const pres2 = A2*x
+pres1 = A1*x
+pres2 = A2*x
 
 if rank == 0
     @test all(getblock(pres1[:]) .≈ ref)
@@ -50,9 +50,9 @@ end
 
 sync(pres2)
 
-(mintime, maxtime) = timed_mul(A1,x)
+global (mintime, maxtime) = timed_mul(A1,x)
 rank == 0 && write_timings("out-mpi.txt", 1, mintime, maxtime)
-(mintime, maxtime) = timed_mul(A2,x)
+global (mintime, maxtime) = timed_mul(A2,x)
 rank == 0 && write_timings("out-mpi.txt", 2, mintime, maxtime)
 
 sync(pres2)

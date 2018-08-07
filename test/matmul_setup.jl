@@ -1,3 +1,4 @@
+using Random
 
 const nb_threads = parse(Int,get(ENV, "OPENBLAS_NUM_THREADS", "-1"))
 if nb_threads == -1

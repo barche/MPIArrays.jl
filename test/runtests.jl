@@ -1,14 +1,14 @@
-using Compat
-import Compat.Sys: BINDIR
+# Make sure this is precompiled on only one process first
+using MPIArrays
 
-julia_exe = joinpath(BINDIR, Base.julia_exename())
+julia_exe = joinpath(Sys.BINDIR, Base.julia_exename())
 mpiexec = "mpiexec"
 
 testdir = dirname(@__FILE__)
 
 mpifiles = ["basics.jl", "matmul_mpi.jl"]
 juliafiles = ["matmul_darray.jl"]
-nprocs = clamp(Sys.CPU_CORES ÷ 2, 2, 4)
+nprocs = clamp(Sys.CPU_THREADS ÷ 2, 2, 4)
 ENV["OPENBLAS_NUM_THREADS"] = 1
 
 for f in mpifiles

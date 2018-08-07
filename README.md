@@ -72,7 +72,7 @@ This will produce a distributed array with 4 partitions, each containing `[1,2,3
 
 The array interface is implemented, including normal indexing operations. Note that these lock and unlock the MPI window on each call, and are therefore expensive. The advantage of having these operations defined is mainly for convenient access to utility functions such as I/O.
 
-Other supported operations from Base are `Base.A_mul_B!` for Matrix-vector product and `Base.filter` and `Base.filter!`
+Other supported operations from Base are `LinearAlgebra.A_mul_B!` for Matrix-vector product and `Base.filter` and `Base.filter!`
 
 ### Utility operations
 

@@ -1,0 +1,13 @@
+name = "MPIArrays"
+uuid = "b2d6846a-9a44-11e8-1eaf-cf045b2c04b1"
+authors = ["Bart Janssens <bart@bartjanssens.org>"]
+version = "0.1.0"
+
+[deps]
+CustomUnitRanges = "dc8bdbbb-1ca9-579f-8c36-e416f6a65cce"
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+DistributedArrays = "aaf54ef3-cdf8-58ed-94cc-d582ad619b94"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
