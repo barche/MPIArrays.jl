@@ -3,3 +3,4 @@
 *.jl.mem
 test/out-*.txt
 examples/*.png
+Manifest.toml

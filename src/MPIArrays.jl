@@ -473,7 +473,7 @@ function globalids(b::GhostedBlock)
     for (i,I) in enumerate(CartesianIndices(localindices(b.array)))
         result[i] = li[I]
     end
-    copy!(result, local_len+1, b.localtoglobal, 1, length(b.localtoglobal))
+    copyto!(result, local_len+1, b.localtoglobal, 1, length(b.localtoglobal))
     return result
 end
 
