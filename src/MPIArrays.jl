@@ -89,8 +89,7 @@ mutable struct MPIArray{T,N} <: AbstractArray{T,N}
         partitioning = ContinuousPartitioning(partition_sizes...)
 
         localarray = Array{T}(undef,length.(partitioning[rank+1]))
-        win = MPI.Win()
-        MPI.Win_create(localarray, MPI.INFO_NULL, comm, win)
+        win = MPI.Win_create(localarray, comm)
         sizes = sum.(partition_sizes)
         return new{T,N}(sizes, localarray, partitioning, comm, win, rank)
     end
@@ -109,8 +108,7 @@ mutable struct MPIArray{T,N} <: AbstractArray{T,N}
             return getindex.(partition_size_array[idx...],dim)
         end
 
-        win = MPI.Win()
-        MPI.Win_create(localarray, MPI.INFO_NULL, comm, win)
+        win = MPI.Win_create(localarray, comm)
         result = new{T,N}(sum.(partition_sizes), localarray, ContinuousPartitioning(partition_sizes...), comm, win, rank)
         return result
     end
@@ -378,7 +376,7 @@ end
 
 function free(a::MPIArray{T,N}) where {T,N}
     sync(a)
-    MPI.Win_free(a.win)
+    MPI.free(a.win)
 end
 
 using CustomUnitRanges: filename_for_urange
